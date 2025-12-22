@@ -3,4 +3,5 @@ pandas
 duckdb
 plotly
 python-dotenv
+openpyxl
 groq
