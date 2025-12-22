@@ -1,79 +1,23 @@
 import streamlit as st
 import pandas as pd
-import duckdb
-import plotly.express as px
-import os
-from dotenv import load_dotenv
 
-# =========================
-# PAGE SETUP
-# =========================
-st.set_page_config(
-    page_title="AccuCheck",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
+st.set_page_config(page_title="AccuCheck", layout="wide")
 
 st.title("AccuCheck")
-st.caption("AI Accounting Policy & Compliance Checker | Rule-based + AI Commentary")
+st.caption("AI Accounting Policy & Compliance Checker")
 
 # =========================
-# LOAD API KEY (OPTIONAL)
-# =========================
-load_dotenv()
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-
-if GROQ_API_KEY:
-    from groq import Groq
-    client = Groq(api_key=GROQ_API_KEY)
-else:
-    client = None
-
-# =========================
-# AI COMMENTARY FUNCTION
-# =========================
-def generate_ai_commentary(summary_df: pd.DataFrame) -> str:
-    """
-    AI commentary bersifat konseptual & edukatif.
-    Tidak melakukan prediksi atau perhitungan lanjutan.
-    """
-    if not client:
-        return "⚠️ AI Commentary tidak aktif (API Key belum diatur)."
-
-    text_data = summary_df.to_string(index=False)
-
-    prompt = f"""
-    Anda adalah AI Accounting Reviewer.
-
-    Berikut ringkasan data keuangan:
-    {text_data}
-
-    Tugas Anda:
-    1. Jelaskan temuan utama secara konseptual
-    2. Identifikasi potensi ketidakkonsistenan pencatatan
-    3. Berikan rekomendasi perbaikan bersifat edukatif
-    4. Gunakan bahasa non-teknis dan mudah dipahami
-    """
-
-    try:
-        response = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.6
-        )
-        return response.choices[0].message.content
-    except Exception as e:
-        return f"❌ Error AI Commentary: {e}"
-
-# =========================
-# DATA UPLOAD
+# FILE UPLOAD
 # =========================
 uploaded_file = st.file_uploader(
-    "📂 Upload file Excel / CSV",
-    type=["xlsx", "xls", "csv"]
+    "Upload file keuangan (CSV / Excel)",
+    type=["csv", "xlsx"]
 )
 
 if uploaded_file:
+    # =========================
+    # READ DATA
+    # =========================
     if uploaded_file.name.endswith(".csv"):
         df = pd.read_csv(uploaded_file)
     else:
@@ -82,26 +26,91 @@ if uploaded_file:
     # =========================
     # DATA PREVIEW
     # =========================
-    st.subheader("📜 Data Preview")
+    st.subheader("📄 Data Preview")
     st.dataframe(df.head())
 
     # =========================
-    # BASIC VALIDATION
+    # IDENTIFY
     # =========================
-    if df.shape[1] < 2:
-        st.warning("⚠️ Data minimal harus memiliki lebih dari satu kolom.")
-        st.stop()
+    st.subheader("🔍 Identify – Struktur & Akun")
+
+    total_rows = df.shape[0]
+    total_cols = df.shape[1]
+
+    st.write(f"Jumlah baris data: **{total_rows}**")
+    st.write(f"Jumlah kolom data: **{total_cols}**")
+    st.write("Nama kolom:")
+    st.write(list(df.columns))
+
+    if "Akun" in df.columns:
+        akun_unik = df["Akun"].dropna().unique()
+        st.write(f"Jumlah akun terdeteksi: **{len(akun_unik)}**")
+        st.write(akun_unik)
+
+    if "Jenis Akun" in df.columns:
+        jenis_akun = df["Jenis Akun"].dropna().unique()
+        st.write("Jenis akun terdeteksi:")
+        st.write(jenis_akun)
+
+    st.success("Tahap Identify selesai")
 
     # =========================
-    # IDENTIFY & MEASURE (AGGREGATION)
+    # MEASURE
     # =========================
-    st.subheader("📊 Ringkasan Data (Identify & Measure)")
+    st.subheader("📊 Measure – Ringkasan Nilai")
 
-    numeric_cols = df.select_dtypes(include="number").columns.tolist()
-    category_cols = df.select_dtypes(exclude="number").columns.tolist()
+    if "Jenis Akun" in df.columns and "Nilai" in df.columns:
+        summary = (
+            df.groupby("Jenis Akun")["Nilai"]
+            .sum()
+            .reset_index()
+        )
 
-    if not numeric_cols or not category_cols:
-        st.warning("⚠️ Data harus memiliki kolom kategori dan numerik.")
-        st.stop()
+        st.write("Total nilai per jenis akun:")
+        st.dataframe(summary)
 
-    cat_col = category_cols[0]
+    else:
+        st.warning("Kolom 'Jenis Akun' atau 'Nilai' tidak ditemukan")
+
+    # =========================
+    # ANALYZE (POLICY & COMPLIANCE)
+    # =========================
+    st.subheader("⚠️ Analyze – Policy & Compliance Check")
+
+    flags = []
+
+    if {"Akun", "Jenis Akun"}.issubset(df.columns):
+        for i, row in df.iterrows():
+            akun = str(row["Akun"]).lower()
+            jenis = str(row["Jenis Akun"]).lower()
+
+            if "pendapatan" in akun and jenis != "pendapatan":
+                flags.append(
+                    f"Baris {i+1}: Akun pendapatan dicatat sebagai {row['Jenis Akun']}"
+                )
+
+            if "beban" in akun and jenis != "beban":
+                flags.append(
+                    f"Baris {i+1}: Akun beban dicatat sebagai {row['Jenis Akun']}"
+                )
+
+            if "kas" in akun and jenis not in ["aset", "asset"]:
+                flags.append(
+                    f"Baris {i+1}: Akun kas seharusnya termasuk Aset"
+                )
+
+    if flags:
+        st.error("Ditemukan potensi ketidaksesuaian kebijakan akuntansi:")
+        for f in flags:
+            st.write("•", f)
+    else:
+        st.success("Tidak ditemukan pelanggaran kebijakan pencatatan yang signifikan")
+
+    # =========================
+    # COMMUNICATE
+    # =========================
+    st.subheader("🗣️ Communicate – Ringkasan Evaluasi")
+
+    if flags:
+        st.write(
+            "Berdasarkan hasil evaluasi, terdapat beberapa pe
