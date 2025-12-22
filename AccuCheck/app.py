@@ -14,11 +14,11 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-st.title("AccuCheck")
+st.title("📊 AccuCheck")
 st.caption("Prototype v2.0 - Rule-based & AI Commentary + Chat Mode")
 
 #######################################
-# LOAD API KEY (Optional: GROQ)
+# LOAD API KEY (OPTIONAL)
 #######################################
 load_dotenv()
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
@@ -34,23 +34,21 @@ else:
 #######################################
 def generate_ai_commentary(region_sales: pd.DataFrame) -> str:
     """
-    Generate AI-based commentary using Groq LLM.
-    Jika API Key tidak tersedia, fungsi akan menampilkan pesan peringatan.
+    Generate AI-based commentary using Groq LLM
     """
     if not client:
         return "⚠️ AI Commentary tidak aktif (API Key belum diatur)."
 
-    # Ubah data menjadi teks agar bisa dianalisis oleh LLM
-    text_summary = region_sales.to_string(index=False)
+    data_text = region_sales.to_string(index=False)
 
     prompt = f"""
     Berikut adalah data penjualan per region:
-    {text_summary}
+    {data_text}
 
-    Sebagai analis bisnis, buat analisis singkat dalam bahasa Indonesia:
-    1. Region mana yang paling dominan
-    2. Region mana yang perlu perhatian
-    3. Insight strategis singkat untuk manajemen
+    Tolong buatkan analisis singkat dalam bahasa Indonesia:
+    - Region yang paling dominan
+    - Region yang perlu perhatian
+    - Insight strategis singkat
     """
 
     try:
@@ -67,48 +65,55 @@ def generate_ai_commentary(region_sales: pd.DataFrame) -> str:
 # DATA UPLOAD
 #######################################
 uploaded_file = st.file_uploader(
-    "📂 Upload file Excel / CSV",
+    "📂 Upload file Excel atau CSV",
     type=["xlsx", "xls", "csv"]
 )
 
 if uploaded_file:
-    # Baca file sesuai format
+    # Read file
     if uploaded_file.name.endswith(".csv"):
         df = pd.read_csv(uploaded_file)
     else:
         df = pd.read_excel(uploaded_file)
 
-    #######################################
-    # DATA PREVIEW
-    #######################################
-    st.subheader("📜 Data Preview")
+    st.subheader("📜 Data Preview (Semua Kolom)")
     st.dataframe(df.head())
 
     #######################################
-    # VALIDASI KOLOM
+    # VALIDATION (OPTION 2)
     #######################################
-    if not {"Region", "Sales"}.issubset(df.columns):
+    required_cols = {"Region", "Sales"}
+
+    if not required_cols.issubset(df.columns):
         st.warning("⚠️ Data harus memiliki kolom `Region` dan `Sales`.")
         st.stop()
 
+    # Gunakan hanya kolom yang dibutuhkan
+    df = df[["Region", "Sales"]]
+
+    # Pastikan Sales numerik
+    df["Sales"] = pd.to_numeric(df["Sales"], errors="coerce")
+
+    # Hapus data kosong
+    df = df.dropna(subset=["Region", "Sales"])
+
     #######################################
-    # DASHBOARD AGGREGATION (DuckDB)
+    # DASHBOARD
     #######################################
-    st.subheader("📈 Dashboard Overview")
+    st.subheader("📈 Dashboard Penjualan per Region")
 
     query = """
-        SELECT 
-            Region,
-            SUM(Sales) AS Total_Sales
-        FROM df
-        GROUP BY Region
-        ORDER BY Total_Sales DESC
+    SELECT
+        Region,
+        SUM(Sales) AS Total_Sales
+    FROM df
+    GROUP BY Region
+    ORDER BY Total_Sales DESC
     """
+
     region_sales = duckdb.sql(query).df()
 
-    #######################################
-    # VISUALIZATION (Plotly)
-    #######################################
+    # Tampilkan grafik
     fig = px.bar(
         region_sales,
         x="Region",
@@ -129,16 +134,14 @@ if uploaded_file:
     bottom_region = region_sales.iloc[-1]["Region"]
     bottom_value = region_sales.iloc[-1]["Total_Sales"]
 
-    gap_value = top_value - bottom_value
+    gap = top_value - bottom_value
 
-    rule_commentary = f"""
-    🔍 **Insight Utama**:
+    st.markdown(f"""
+    **Insight Otomatis:**
     - Region dengan penjualan tertinggi adalah **{top_region}** sebesar **{top_value:,.0f}**.
     - Region dengan penjualan terendah adalah **{bottom_region}** sebesar **{bottom_value:,.0f}**.
-    - Selisih (gap) antara region tertinggi dan terendah adalah **{gap_value:,.0f}**.
-    """
-
-    st.markdown(rule_commentary)
+    - Selisih penjualan antara region tertinggi dan terendah adalah **{gap:,.0f}**.
+    """)
 
     #######################################
     # AI COMMENTARY
@@ -152,7 +155,6 @@ if uploaded_file:
     #######################################
     st.subheader("💬 Chat dengan AI Analis")
 
-    # Inisialisasi chat history
     if "chat_history" not in st.session_state:
         st.session_state.chat_history = [
             {
@@ -169,11 +171,11 @@ if uploaded_file:
     for msg in st.session_state.chat_history:
         if msg["role"] == "user":
             st.chat_message("user").write(msg["content"])
-        else:
+        elif msg["role"] == "assistant":
             st.chat_message("assistant").write(msg["content"])
 
     # Input chat baru
-    if question := st.chat_input("Tanyakan sesuatu tentang data penjualan..."):
+    if question := st.chat_input("Tanyakan sesuatu tentang data..."):
         st.session_state.chat_history.append(
             {"role": "user", "content": question}
         )
@@ -198,4 +200,4 @@ if uploaded_file:
         st.chat_message("assistant").write(answer)
 
 else:
-    st.info("⬆️ Upload file Excel/CSV untuk memulai analisis.")
+    st.info("⬆️ Silakan upload file Excel atau CSV untuk memulai analisis.")
