@@ -2,13 +2,8 @@ import streamlit as st
 import pandas as pd
 
 st.set_page_config(page_title="AccuCheck", layout="wide")
+st.title("AccuCheck – AI Accounting Policy & Compliance Checker")
 
-st.title("AccuCheck")
-st.caption("AI Accounting Policy & Compliance Checker")
-
-# =====================
-# FILE UPLOAD
-# =====================
 uploaded_file = st.file_uploader(
     "Upload file keuangan (CSV / Excel)",
     type=["csv", "xlsx"]
@@ -16,18 +11,13 @@ uploaded_file = st.file_uploader(
 
 if uploaded_file:
     # =====================
-    # READ DATA
+    # READ FILE
     # =====================
     if uploaded_file.name.endswith(".csv"):
         df = pd.read_csv(uploaded_file)
     else:
         df = pd.read_excel(uploaded_file)
 
-    df.columns = df.columns.str.strip()  # bersihkan spasi
-
-    # =====================
-    # DATA PREVIEW
-    # =====================
     st.subheader("📄 Data Preview")
     st.dataframe(df.head())
 
@@ -36,74 +26,76 @@ if uploaded_file:
     # =====================
     st.subheader("🔍 Identify – Struktur Data")
 
-    st.write(f"Jumlah baris: **{df.shape[0]}**")
-    st.write(f"Jumlah kolom: **{df.shape[1]}**")
+    columns_lower = {c.lower(): c for c in df.columns}
+
+    def find_column(possible_names):
+        for name in possible_names:
+            if name in columns_lower:
+                return columns_lower[name]
+        return None
+
+    akun_col = find_column(["akun", "account"])
+    jenis_col = find_column(["jenis akun", "jenis_akun", "account type", "type"])
+    nilai_col = find_column(["nilai", "amount", "value", "nominal"])
+
     st.write("Kolom terdeteksi:")
-    st.write(list(df.columns))
+    st.write({
+        "Akun": akun_col,
+        "Jenis Akun": jenis_col,
+        "Nilai": nilai_col
+    })
 
-    # Auto-detect kolom
-    jenis_akun_col = None
-    nilai_col = None
-
-    for col in df.columns:
-        if col.lower() in ["jenis akun", "jenis_akun", "account type"]:
-            jenis_akun_col = col
-        if col.lower() in ["nilai", "amount", "value"]:
-            nilai_col = col
-
-    if not jenis_akun_col or not nilai_col:
-        st.error("Kolom 'Jenis Akun' atau 'Nilai' tidak ditemukan.")
+    if not nilai_col:
+        st.error("Kolom nilai/amount tidak ditemukan. Measure tidak dapat dijalankan.")
         st.stop()
-
-    st.success(f"Kolom Jenis Akun: {jenis_akun_col}")
-    st.success(f"Kolom Nilai: {nilai_col}")
 
     # =====================
     # MEASURE
     # =====================
-    st.subheader("📊 Measure – Ringkasan Nilai")
+    st.subheader("📊 Measure – Ringkasan Data")
 
-    summary = df.groupby(jenis_akun_col)[nilai_col].sum().reset_index()
-    st.dataframe(summary)
+    if jenis_col:
+        summary = df.groupby(jenis_col)[nilai_col].sum().reset_index()
+        st.write("Ringkasan nilai per jenis akun:")
+        st.dataframe(summary)
+    else:
+        st.warning("Kolom jenis akun tidak ditemukan. Measure dilakukan secara total.")
+        st.write(f"Total nilai: {df[nilai_col].sum():,.0f}")
 
     # =====================
-    # ANALYZE (COMPLIANCE CHECK)
+    # ANALYZE (COMPLIANCE)
     # =====================
     st.subheader("⚠️ Analyze – Policy & Compliance Check")
 
     flags = []
 
-    for i, row in df.iterrows():
-        akun = str(row.get("Akun", "")).lower()
-        jenis = str(row[jenis_akun_col]).lower()
+    if akun_col and jenis_col:
+        for _, row in df.iterrows():
+            akun = str(row[akun_col]).lower()
+            jenis = str(row[jenis_col]).lower()
 
-        if "pendapatan" in akun and "pendapatan" not in jenis:
-            flags.append(f"Baris {i+1}: Akun pendapatan diklasifikasikan sebagai {row[jenis_akun_col]}")
+            if "pendapatan" in akun and jenis != "pendapatan":
+                flags.append("Akun pendapatan dicatat bukan sebagai pendapatan")
 
-        if "beban" in akun and "beban" not in jenis:
-            flags.append(f"Baris {i+1}: Akun beban diklasifikasikan sebagai {row[jenis_akun_col]}")
+            if "beban" in akun and jenis != "beban":
+                flags.append("Akun beban dicatat bukan sebagai beban")
 
     if flags:
-        for f in flags:
-            st.warning(f)
+        st.error("Ditemukan potensi ketidaksesuaian kebijakan akuntansi:")
+        for f in set(flags):
+            st.write(f"- {f}")
     else:
-        st.success("Tidak ditemukan ketidaksesuaian kebijakan akuntansi.")
+        st.success("Tidak ditemukan ketidaksesuaian kebijakan yang signifikan.")
 
     # =====================
     # COMMUNICATE
     # =====================
-    st.subheader("🧠 Interpretasi AI")
+    st.subheader("🧾 Interpretasi AI")
 
-    if flags:
-        st.write("""
-Berdasarkan hasil evaluasi, terdapat beberapa potensi ketidaksesuaian
-dalam klasifikasi akun yang dapat memengaruhi kualitas laporan keuangan.
-Disarankan untuk meninjau kembali kebijakan pencatatan yang digunakan.
-""")
-    else:
-        st.write("""
-Berdasarkan hasil evaluasi awal, pencatatan keuangan telah
-menunjukkan konsistensi dengan kebijakan akuntansi yang digunakan.
+    st.write("""
+AccuCheck melakukan evaluasi awal terhadap struktur dan konsistensi
+pencatatan keuangan berdasarkan kebijakan akuntansi dasar.
+Hasil ini bersifat pendukung dan tidak menggantikan penilaian profesional.
 """)
 
     # =====================
@@ -112,7 +104,7 @@ menunjukkan konsistensi dengan kebijakan akuntansi yang digunakan.
     st.subheader("✅ Rekomendasi")
 
     st.write("""
-- Lakukan peninjauan ulang pada akun yang terindikasi tidak sesuai
-- Pastikan klasifikasi akun mengikuti kebijakan akuntansi
-- Gunakan hasil evaluasi ini sebagai review awal sebelum laporan digunakan
+1. Lakukan peninjauan ulang terhadap klasifikasi akun.
+2. Pastikan konsistensi jenis akun dengan kebijakan akuntansi.
+3. Gunakan hasil evaluasi ini sebagai dasar review lanjutan.
 """)
